@@ -1,215 +1,77 @@
-# 🕵️‍♂️ Smart Business & Contact Scraper
+# Smart Business & Contact Scraper
 
-A professional, high-performance asynchronous tool for **Lead Generation** and **Business Intelligence**.  
-It bypasses modern bot protections (such as Cloudflare) and uses a **local LLM (Ollama)** to intelligently categorize website niches based on their content.
+Асинхронный парсер для сбора контактных данных (email) и автоматической классификации тематики (ниши) веб-сайтов с использованием локальных LLM (через Ollama). 
 
----
+Скрипт читает Excel-файл со списком доменов, обходит их главные страницы (а также страницы контактов, «О нас», страницы агентств и XML Sitemap), извлекает email-адреса, а затем определяет категорию бизнеса с помощью нейросети по содержимому сайта (текст, заголовки, метаданные).
 
-# 🚀 Key Features
+## Основные возможности
 
-## Multi-Stage Fetching Pipeline
+- **Высокая производительность (asyncio)**: Асинхронная обработка сайтов с пулированием контекстов браузера (Playwright) и подключений (по умолчанию `SCRAPER_CONCURRENCY=2`). Парсинг разбит на пакеты (батчи) с очисткой памяти для стабильной работы.
+- **Трехуровневый обход защит**:
+  1. **aiohttp** — приоритетный, быстрый метод получения HTML.
+  2. **cloudscraper** — фоллбек для обхода базовых проверок HTTP (синхронные запросы безопасно обернуты в пулы потоков с таймаутами).
+  3. **Playwright** — использование `Chromium` с headless-режимом и внедрением stealth-скриптов для тяжелых случаев защиты (поведенческий анализ, обфускация Cloudflare).
+- **Интеллектуальный парсинг контактов**: Защита от Cloudflare (декодирование `__cf_email__`), поиск скрытых email в `application/ld+json`, сканирование страниц контактов по ключам из URL и анкоров ссылок. Производится деобфускация (замена `[at]`, `{dot}` на `@` и `.`).
+- **Ранжирование email-адресов**: Сортировка по встроенным TIER-листам. Приоритет отдается корпоративным адресам на сканируемом домене, а также ящикам вроде `marketing@`, `partnership@`, `info@` и т.д.
+- **Анализ ниши (LLM)**: Интеграция с OpenAI API для работы с локальной LLM (по умолчанию используется `llama3.2:3b` через Ollama). Нейросеть получает сжатую версию контента (до 2500 символов: Title, Description, Headings, Text) и возвращает строгую категорию от 1 до 3 слов (например, News, SaaS, E-commerce, Blog и др.).
 
-### Tier 1 — aiohttp
-Ultra-fast raw HTML fetching for unprotected websites.
+## Требования
 
-### Tier 2 — cloudscraper
-Specialized bypass for Cloudflare TLS fingerprinting protection.
+- Python 3.9+
+- Установленные браузеры для Playwright
+- Запущенный сервер [Ollama](https://ollama.com/) с установленной моделью (по умолчанию `llama3.2:3b`).
 
-### Tier 3 — Playwright (Stealth)
-Full browser emulation to solve JavaScript challenges and decode protected emails.
+## Установка
 
----
+1. Склонируйте репозиторий или скачайте код проекта:
+   ```bash
+   git clone <URL_репозитория>
+   cd websites_topics
+   ```
 
-## 🤖 AI-Powered Categorization
+2. Установите зависимости из файла `requirements.txt`:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-Integrated with **Ollama (local LLM)** to analyze website text and automatically determine the business niche.
+3. Загрузите и установите браузеры для Playwright:
+   ```bash
+   playwright install
+   ```
 
-Examples of detected niches:
-- Marketing Agency
-- E-commerce
-- SaaS
-- Consulting
-- Software Development
+4. Запустите Ollama и скачайте нужную модель (по умолчанию используется `llama3.2:3b`, но можно заменить в `main.py`):
+   ```bash
+   ollama run llama3.2:3b
+   ```
 
----
+## Использование
 
-## 📧 Smart Contact Extraction
+1. Подготовьте входной файл: создайте Excel-файл **`sites_to_check.xlsx`**. Поместите в первую колонку (или в колонку с заголовком `URL`) список доменов или URL-адресов сайтов, которые необходимо проверить.
 
-The scraper prioritizes **high-value business emails** over generic ones.
+2. (Опционально) Настройте переменные окружения для работы:
+   - `OPENAI_BASE_URL`: Базовый URL для LLM (по умолчанию `http://localhost:11434/v1` для Ollama).
+   - `SCRAPER_CONCURRENCY`: Количество конкурентных потоков сканирования (значение по умолчанию `2`).
 
-High priority:
-- `ceo@`
-- `advertising@`
-- `partnership@`
-- `business@`
+3. Запустите парсер:
+   ```bash
+   python main.py
+   ```
 
-Lower priority:
-- `info@`
-- `office@`
-- `support@`
+4. Дождитесь завершения обхода. Результат будет сохранен в файл **`leads_result.xlsx`**. Порядок доменов из исходного файла сохранится.
 
----
+### Формат выходного файла (`leads_result.xlsx`)
 
-## ⚙️ Industrial-Grade Stability
+- **Site URL** — Нормализованный адрес проверенного сайта.
+- **Email** — Лучший из найденных email-адресов (согласно системе внутреннего ранжирования).
+- **Thematic** — Определенная нейросетью тематика бизнеса (например: News, Law Firm, E-commerce) или статус ошибки, если сайт недоступен (`Offline / Unreachable`, `Error / BatchCrash` и т.п.).
 
-### DNS Pre-check
-Quickly skips dead or unreachable domains.
+## Под капотом (Оптимизации)
 
-### Batch Processing
-Periodically refreshes browser contexts to prevent memory leaks.
+1. **Предпроверка (Precheck)**: Быстрый DNS-запрос и `aiohttp.head()` позволяют сразу отбросить "мертвые" домены без запуска тяжеловесных scraper-инструментов или запуска Chrome/Playwright.
+2. **Batching**: Сайты обрабатываются пакетами (`BATCH_SIZE=10`). Под каждый пакет создается новый изолированный контекст браузера Playwright (очищаются cookies и кэш памяти). Chromium-процесс работает один на протяжении всей сессии.
+3. **Бесконтрольный обход CSS/Image**: Playwright программно блокирует загрузку стилей, медиа, картинок и шрифтов, чтобы максимально сэкономить время и пропускную способность канала, ускоряя рендеринг DOM для парсинга.
 
-### Heartbeat Monitor
-Detects stalled tasks and cancels them so the scraper never hangs.
+## Дополнительно
 
----
-
-# 🛠 Installation Guide
-
-Follow these steps to install and run the scraper on **Windows, Linux, or macOS**.
-
----
-
-# 1. Prerequisites
-
-Make sure you have installed:
-
-- **Python 3.9+**
-- **Ollama**
-- **Microsoft Excel** (to prepare input and view results)
-
----
-
-# 2. Setup Environment & Libraries
-
-It is recommended to use a **virtual environment**.
-
-Create the environment:
-
-
-python -m venv venv
-
-Activate it.
-
-Linux / macOS:
-
-source venv/bin/activate
-
-Windows:
-
-venv\Scripts\activate
-
-Install required Python libraries:
-
-pip install asyncio aiohttp pandas beautifulsoup4 playwright cloudscraper openai openpyxl
-3. Install Playwright Browser
-
-The scraper requires Chromium to handle JavaScript-protected websites.
-
-Install the browser with:
-
-python -m playwright install chromium
-
-This downloads a local Chromium instance used by Playwright.
-
-4. Configure Ollama (Local LLM)
-
-Download Ollama from:
-
-https://ollama.com
-
-Install and launch the application.
-
-Pull the language model used by the scraper (example: Llama 3):
-
-ollama pull llama3
-
-Ensure the Ollama service is running before starting the scraper.
-
-The API endpoint used by the script:
-
-http://localhost:11434/v1
-📖 How to Use
-1. Prepare Input File
-
-Create an Excel file named:
-
-sites_to_check.xlsx
-
-The file must contain a column named:
-
-URL
-
-Example:
-
-URL
-example.com
-shop.com
-agency.com
-2. Run the Scraper
-
-Run the script from the project folder:
-
-python main.py
-3. Check Results
-
-After the scraper finishes, results will be saved to:
-
-leads_result.xlsx
-
-The output file contains:
-
-Website URL
-
-Extracted emails
-
-AI-detected business niche
-
-Processing status
-
-🔍 Troubleshooting
-Issue	Solution
-ModuleNotFoundError	Run pip install [module_name]
-Playwright Error	Run python -m playwright install chromium
-Ollama Connection Error	Ensure the Ollama application is running
-High Memory Usage	Reduce SCRAPER_CONCURRENCY
-⚙️ Advanced Configuration
-
-You can configure performance using environment variables.
-
-SCRAPER_CONCURRENCY
-
-Number of websites processed simultaneously.
-
-Default value:
-
-2
-
-Example:
-
-Linux / macOS:
-
-export SCRAPER_CONCURRENCY=5
-
-Windows:
-
-set SCRAPER_CONCURRENCY=5
-OPENAI_BASE_URL
-
-API endpoint used for Ollama.
-
-Default value:
-
-http://localhost:11434/v1
-📊 Output
-
-The scraper generates the file:
-
-leads_result.xlsx
-
-It includes:
-
-Website URL
-
-Extracted contact emails
-
-AI-detected niche
+Файл `proxies.txt` не используется напрямую в скрипте по умолчанию (возможно, остаток от других проектов или требуется самостоятельная интеграция с `cloudscraper` и `aiohttp`, при необходимости).
+Для адаптации под другие модели, просто измените параметр `model` в функции `categorize_niche` в файле `main.py`.
